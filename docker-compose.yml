@@ -1,0 +1,119 @@
+
+services:
+
+  web:
+    build: ./services/web
+    container_name: web-container
+    ports:
+      - "8080:80"
+    depends_on:
+      product:
+        condition: service_healthy
+      user:
+        condition: service_healthy
+      order:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      search:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  product:
+    build: ./services/product
+    container_name: product-container
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+    healthcheck: &backend-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  user:
+    build: ./services/user
+    container_name: user-container
+    ports:
+      - "8005:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck: *backend-health
+
+  order:
+    build: ./services/order
+    container_name: order-container
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      USER_SERVICE_URL: http://user:8000
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      database:
+        condition: service_healthy
+      user:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck: *backend-health
+
+  payment:
+    build: ./services/payment
+    container_name: payment-container
+    ports:
+      - "8004:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
+      ORDER_SERVICE_URL: http://order:8000
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      database:
+        condition: service_healthy
+      order:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck: *backend-health
+
+  search:
+    build: ./services/search
+    container_name: search-container
+    ports:
+      - "8003:8000"
+    environment:
+      PRODUCT_SERVICE_URL: http://product:8000
+    depends_on:
+      product:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck: *backend-health
+
+  database:
+    image: postgres:16
+    container_name: database-container
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+
